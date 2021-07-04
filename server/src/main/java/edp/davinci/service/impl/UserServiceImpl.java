@@ -30,6 +30,7 @@ import edp.core.exception.ServerException;
 import edp.core.model.MailContent;
 import edp.core.utils.*;
 import edp.davinci.core.common.Constants;
+import edp.davinci.core.common.ErrorMsg;
 import edp.davinci.core.common.ResultMap;
 import edp.davinci.core.enums.CheckEntityEnum;
 import edp.davinci.core.enums.LockType;
@@ -357,7 +358,7 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
 
         // 已经激活，不需要再次激活
         if (user.getActive()) {
-            return resultMap.fail(302).message("The current user is activated and doesn't need to be reactivated");
+            return resultMap.fail().message("The current user is activated and doesn't need to be reactivated");
         }
 
         BaseLock lock = LockFactory.getLock("ACTIVATE" + Consts.AT_SYMBOL + username.toUpperCase(), 5, LockType.REDIS);
@@ -544,10 +545,10 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
         String username = tokenUtils.getUsername(Constants.TOKEN_PREFIX + Constants.SPACE + token);
         User user = getByUsername(username);
         if (null == user) {
-            return new ResultMap().fail(HttpCodeEnum.FORBIDDEN.getCode()).message("ERROR Permission denied");
+            return new ResultMap().fail(HttpCodeEnum.FORBIDDEN.getCode()).message(ErrorMsg.ERR_MSG_PERMISSION);
         }
         if (!tokenUtils.validateToken(token, user)) {
-            return new ResultMap().fail(HttpCodeEnum.FORBIDDEN.getCode()).message("ERROR Permission denied");
+            return new ResultMap().fail(HttpCodeEnum.FORBIDDEN.getCode()).message(ErrorMsg.ERR_MSG_PERMISSION);
         }
         UserProfile userProfile = new UserProfile();
         BeanUtils.copyProperties(user, userProfile);
@@ -649,7 +650,7 @@ public class UserServiceImpl extends BaseEntityService implements UserService {
             throw new ServerException("Password cannot be Empty");
         }
 
-        String uncompress = StringZipUtil.uncompress(token);
+        String uncompress = StringZipUtil.decompress(token);
         user.setPassword(ticket.getCheckCode());
         if (!tokenUtils.validateToken(uncompress, user)) {
             throw new ServerException("Invalid check code, check code is wrong or has expired");

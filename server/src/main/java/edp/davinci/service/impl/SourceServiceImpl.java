@@ -26,7 +26,7 @@ import edp.core.enums.DataTypeEnum;
 import edp.core.exception.NotFoundException;
 import edp.core.exception.ServerException;
 import edp.core.exception.SourceException;
-import edp.core.exception.UnAuthorizedExecption;
+import edp.core.exception.UnAuthorizedException;
 import edp.core.model.DBTables;
 import edp.core.model.JdbcSourceInfo;
 import edp.core.model.JdbcSourceInfo.JdbcSourceInfoBuilder;
@@ -39,6 +39,7 @@ import edp.davinci.core.model.DataUploadEntity;
 import edp.davinci.core.model.RedisMessageEntity;
 import edp.davinci.core.utils.CsvUtils;
 import edp.davinci.core.utils.ExcelUtils;
+import edp.davinci.core.utils.SourcePasswordEncryptUtils;
 import edp.davinci.dao.SourceMapper;
 import edp.davinci.dao.ViewMapper;
 import edp.davinci.dto.projectDto.ProjectDetail;
@@ -122,14 +123,14 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
      */
     @Override
     public List<Source> getSources(Long projectId, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         ProjectDetail projectDetail = null;
         try {
             projectDetail = projectService.getProjectDetail(projectId, user, false);
         } catch (NotFoundException e) {
             throw e;
-        } catch (UnAuthorizedExecption e) {
+        } catch (UnAuthorizedException e) {
             return null;
         }
 
@@ -147,19 +148,23 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
 
     @Override
     public SourceDetail getSourceDetail(Long id, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(id);
 
         ProjectPermission projectPermission = getProjectPermission(source.getProjectId(), user);
 
         if (projectPermission.getSourcePermission() == UserPermissionEnum.HIDDEN.getPermission()) {
-            throw new UnAuthorizedExecption();
+            throw new UnAuthorizedException();
         }
 
         SourceDetail sourceDetail = new SourceDetail();
         BeanUtils.copyProperties(source, sourceDetail);
-
+        // Decrypt the password in config
+        JSONObject jsonObject = JSONObject.parseObject(sourceDetail.getConfig());
+        String decrypt = SourcePasswordEncryptUtils.decrypt((String) jsonObject.get("password"));
+        jsonObject.put("password", decrypt);
+        sourceDetail.setConfig(jsonObject.toString());
         if (projectPermission.getSourcePermission() == UserPermissionEnum.READ.getPermission()) {
             sourceDetail.setConfig(null);
         }
@@ -177,7 +182,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
     @Override
     @Transactional
     public Source createSource(SourceCreate sourceCreate, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         Long projectId = sourceCreate.getProjectId();
         checkWritePermission(entity, projectId, user, "create");
@@ -205,8 +210,11 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
 
             Source source = new Source().createdBy(user.getId());
             BeanUtils.copyProperties(sourceCreate, source);
-            source.setConfig(JSONObject.toJSONString(config));
-
+            // Decrypt the password in config
+            JSONObject jsonObject = JSONObject.parseObject(JSONObject.toJSONString(config));
+            String encrypt = SourcePasswordEncryptUtils.encrypt((String) jsonObject.get("password"));
+            jsonObject.put("password", encrypt);
+            source.setConfig(jsonObject.toString());
             if (sourceMapper.insert(source) != 1) {
                 log.info("create source fail:{}", source.toString());
                 throw new ServerException("create source fail");
@@ -233,10 +241,12 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
     }
 
     private boolean testConnection(SourceConfig config) {
+        // The password is encrypted
+        String encrypt = SourcePasswordEncryptUtils.encrypt(config.getPassword());
         return sqlUtils.init(
                 config.getUrl(),
                 config.getUsername(),
-                config.getPassword(),
+                encrypt,
                 config.getVersion(),
                 config.getProperties(),
                 config.isExt()
@@ -253,7 +263,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
     @Override
     @Transactional
     public Source updateSource(SourceInfo sourceInfo, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(sourceInfo.getId());
         checkWritePermission(entity, source.getProjectId(), user, "update");
@@ -282,8 +292,11 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
 
             BeanUtils.copyProperties(sourceInfo, source);
             source.updatedBy(user.getId());
-            source.setConfig(JSONObject.toJSONString(sourceInfo.getConfig()));
-
+            // Decrypt the password in config
+            JSONObject jsonObject = JSONObject.parseObject(JSONObject.toJSONString(sourceInfo.getConfig()));
+            String encrypt = SourcePasswordEncryptUtils.encrypt((String) jsonObject.get("password"));
+            jsonObject.put("password", encrypt);
+            source.setConfig(jsonObject.toString());
             if (sourceMapper.update(source) != 1) {
                 log.info("update source fail:{}", source.toString());
                 throw new ServerException("update source fail:unspecified error");
@@ -325,7 +338,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
      */
     @Override
     @Transactional
-    public boolean deleteSrouce(Long id, User user) throws NotFoundException, UnAuthorizedExecption, ServerException {
+    public boolean deleteSrouce(Long id, User user) throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(id);
 
@@ -347,7 +360,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
     }
 
     /**
-     * 测试连接
+     * 测试数据源
      *
      * @param sourceTest
      * @return
@@ -369,18 +382,20 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
                 sourceTest.setExt(false);
             }
 
-            testConnection = sqlUtils
-                    .init(
-                            sourceTest.getUrl(),
-                            sourceTest.getUsername(),
-                            sourceTest.getPassword(),
-                            sourceTest.getVersion(),
-                            sourceTest.getProperties(),
-                            sourceTest.isExt()
-                    ).testConnection();
+            JdbcSourceInfo jdbcSourceInfo = JdbcSourceInfoBuilder
+                    .aJdbcSourceInfo()
+                    .withJdbcUrl(sourceTest.getUrl())
+                    .withUsername(sourceTest.getUsername())
+                    .withPassword(sourceTest.getPassword())
+                    .withProperties(sourceTest.getProperties())
+                    .withExt(sourceTest.isExt())
+                    .withDbVersion(sourceTest.getVersion())
+                    .build();
+
+            testConnection = new SourceUtils(jdbcDataSource).testSource(jdbcSourceInfo);
 
         } catch (SourceException e) {
-            log.error(e.getMessage());
+            log.error(e.toString(), e);
             throw new ServerException(e.getMessage());
         }
 
@@ -401,7 +416,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
      */
     @Override
     public void validCsvmeta(Long sourceId, UploadMeta uploadMeta, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(sourceId);
 
@@ -437,7 +452,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
     @Override
     @Transactional
     public Boolean dataUpload(Long sourceId, SourceDataUpload sourceDataUpload, MultipartFile file, User user,
-                              String type) throws NotFoundException, UnAuthorizedExecption, ServerException {
+                              String type) throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(sourceId);
 
@@ -599,14 +614,14 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
 
     @Override
     public boolean reconnect(Long id, DbBaseInfo dbBaseInfo, User user)
-            throws NotFoundException, UnAuthorizedExecption, ServerException {
+            throws NotFoundException, UnAuthorizedException, ServerException {
 
         Source source = getSource(id);
 
         checkWritePermission(entity, source.getProjectId(), user, "reconnect");
 
         if (!(dbBaseInfo.getDbUser().equals(source.getUsername())
-                && dbBaseInfo.getDbPassword().equals(source.getPassword()))) {
+                && dbBaseInfo.getDbPassword().equals(SourcePasswordEncryptUtils.decrypt(source.getPassword())))) {
             log.warn("reconnect source (:{}) error, dbuser and dbpassword is wrong", id);
             throw new ServerException("user or password is wrong");
         }
@@ -623,6 +638,18 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
      */
     private void releaseSource(Source source) {
 
+        SourceUtils sourceUtils = new SourceUtils(jdbcDataSource);
+        JdbcSourceInfo jdbcSourceInfo = JdbcSourceInfoBuilder
+                .aJdbcSourceInfo()
+                .withJdbcUrl(source.getJdbcUrl())
+                .withUsername(source.getUsername())
+                .withPassword(source.getPassword())
+                .withDbVersion(source.getDbVersion())
+                .withExt(source.isExt())
+                .build();
+
+        sourceUtils.releaseDataSource(jdbcSourceInfo);
+
         if (redisUtils.isRedisEnable()) {
             Map<String, Object> map = new HashMap<>();
 
@@ -632,21 +659,8 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
             map.put("version", source.getDbVersion());
             map.put("ext", source.isExt());
 
-            publishReconnect(JSON.toJSONString(map));
-        } else {
-            SourceUtils sourceUtils = new SourceUtils(jdbcDataSource);
-            JdbcSourceInfo jdbcSourceInfo = JdbcSourceInfoBuilder
-                    .aJdbcSourceInfo()
-                    .withJdbcUrl(source.getJdbcUrl())
-                    .withUsername(source.getUsername())
-                    .withPassword(source.getPassword())
-                    .withDatabase(source.getDatabase())
-                    .withDbVersion(source.getDbVersion())
-                    .withProperties(source.getProperties())
-                    .withExt(source.isExt())
-                    .build();
-
-            sourceUtils.releaseDataSource(jdbcSourceInfo);
+            SourceUtils.getReleaseSourceSet().add(String.valueOf(source.getId()));
+            publishReconnect(JSON.toJSONString(map), source.getId());
         }
     }
 
@@ -654,27 +668,24 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
      * 向redis发布reconnect消息
      *
      * @param message
+     * @param id
      */
-    private void publishReconnect(String message) {
-
-        //	String flag = MD5Util.getMD5(UUID.randomUUID().toString() + id, true, 32);
-        // the flag is deprecated
-        String flag = "-1";
-        redisUtils.convertAndSend(DAVINCI_TOPIC_CHANNEL, new RedisMessageEntity(SourceMessageHandler.class, message, flag));
+    private void publishReconnect(String message, Long id) {
+        redisUtils.convertAndSend(DAVINCI_TOPIC_CHANNEL, new RedisMessageEntity(SourceMessageHandler.class, message, String.valueOf(id)));
     }
 
     /**
      * 建表
      *
-     * @param fileds
+     * @param fields
      * @param sourceDataUpload
      * @param source
      * @throws ServerException
      */
-    private void createTable(Set<QueryColumn> fileds, SourceDataUpload sourceDataUpload, Source source)
+    private void createTable(Set<QueryColumn> fields, SourceDataUpload sourceDataUpload, Source source)
             throws ServerException {
 
-        if (CollectionUtils.isEmpty(fileds)) {
+        if (CollectionUtils.isEmpty(fields)) {
             throw new ServerException("there is have not any fields");
         }
 
@@ -687,7 +698,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
         if (sourceDataUpload.getMode() == UploadModeEnum.COVER.getMode()) {
             ST st = stg.getInstanceOf("createTable");
             st.add("tableName", sourceDataUpload.getTableName());
-            st.add("fields", fileds);
+            st.add("fields", fields);
             st.add("primaryKeys", StringUtils.isEmpty(sourceDataUpload.getPrimaryKeys()) ? null
                     : sourceDataUpload.getPrimaryKeys().split(","));
             st.add("indexKeys", sourceDataUpload.getIndexList());
@@ -701,7 +712,7 @@ public class SourceServiceImpl extends BaseEntityService implements SourceServic
                 if (!tableIsExist) {
                     ST st = stg.getInstanceOf("createTable");
                     st.add("tableName", sourceDataUpload.getTableName());
-                    st.add("fields", fileds);
+                    st.add("fields", fields);
                     st.add("primaryKeys", sourceDataUpload.getPrimaryKeys());
                     st.add("indexKeys", sourceDataUpload.getIndexList());
 

@@ -29,6 +29,7 @@ import edp.core.exception.SourceException;
 import edp.core.model.*;
 import edp.davinci.core.enums.LogNameEnum;
 import edp.davinci.core.enums.SqlColumnEnum;
+import edp.davinci.core.utils.SourcePasswordEncryptUtils;
 import edp.davinci.core.utils.SqlParseUtils;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -93,11 +94,13 @@ public class SqlUtils {
     private SourceUtils sourceUtils;
 
     public SqlUtils init(BaseSource source) {
+        // Password decryption
+        String decrypt = SourcePasswordEncryptUtils.decrypt(source.getPassword());
         return SqlUtilsBuilder
                 .getBuilder()
                 .withJdbcUrl(source.getJdbcUrl())
                 .withUsername(source.getUsername())
-                .withPassword(source.getPassword())
+                .withPassword(decrypt)
                 .withDbVersion(source.getDbVersion())
                 .withProperties(source.getProperties())
                 .withIsExt(source.isExt())
@@ -108,11 +111,13 @@ public class SqlUtils {
     }
 
     public SqlUtils init(String jdbcUrl, String username, String password, String dbVersion, List<Dict> properties, boolean ext) {
+        // Password decryption
+        String decrypt = SourcePasswordEncryptUtils.decrypt(password);
         return SqlUtilsBuilder
                 .getBuilder()
                 .withJdbcUrl(jdbcUrl)
                 .withUsername(username)
-                .withPassword(password)
+                .withPassword(decrypt)
                 .withDbVersion(dbVersion)
                 .withProperties(properties)
                 .withIsExt(ext)
@@ -184,14 +189,11 @@ public class SqlUtils {
 
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         jdbcTemplate.setMaxRows(resultLimit);
-
         if (pageNo < 1 && pageSize < 1) {
 
             if (limit > 0) {
-                resultLimit = limit > resultLimit ? resultLimit : limit;
+                jdbcTemplate.setMaxRows(Math.min(limit, resultLimit));
             }
-
-            jdbcTemplate.setMaxRows(resultLimit);
 
             // special for mysql
             if (getDataTypeEnum() == DataTypeEnum.MYSQL) {
@@ -216,18 +218,22 @@ public class SqlUtils {
             }
 
             if (limit > 0) {
-                limit = limit > resultLimit ? resultLimit : limit;
-                totalCount = Math.min(limit, totalCount);
+                totalCount = Math.min(Math.min(limit, resultLimit), totalCount);
+                if (limit < pageNo * pageSize) {
+                    jdbcTemplate.setMaxRows(limit - startRow);
+                } else {
+                    jdbcTemplate.setMaxRows(Math.min(limit, pageSize));
+                }
+            } else {
+                jdbcTemplate.setMaxRows(pageNo * pageSize);
             }
 
             paginateWithQueryColumns.setTotalCount(totalCount);
-            int maxRows = limit > 0 && limit < pageSize * pageNo ? limit : pageSize * pageNo;
 
             if (this.dataTypeEnum == MYSQL) {
                 sql = sql + " LIMIT " + startRow + ", " + pageSize;
                 getResultForPaginate(sql, paginateWithQueryColumns, jdbcTemplate, excludeColumns, -1);
             } else {
-                jdbcTemplate.setMaxRows(maxRows);
                 getResultForPaginate(sql, paginateWithQueryColumns, jdbcTemplate, excludeColumns, startRow);
             }
         }
@@ -464,7 +470,7 @@ public class SqlUtils {
         try {
             connection = sourceUtils.getConnection(this.jdbcSourceInfo);
             if (null == connection) {
-                return tableList;
+                return null;
             }
 
             DatabaseMetaData metaData = connection.getMetaData();
@@ -477,7 +483,7 @@ public class SqlUtils {
 
             tables = metaData.getTables(dbName, getDBSchemaPattern(schema), "%", TABLE_TYPES);
             if (null == tables) {
-                return tableList;
+                return null;
             }
 
             tableList = new ArrayList<>();
@@ -494,11 +500,11 @@ public class SqlUtils {
                 }
             }
         } catch (Exception e) {
-            log.error(e.getMessage(), e);
+            log.error(e.toString(), e);
             return tableList;
         } finally {
-            SourceUtils.releaseConnection(connection);
             SourceUtils.closeResult(tables);
+            SourceUtils.releaseConnection(connection);
         }
         return tableList;
     }
@@ -549,7 +555,7 @@ public class SqlUtils {
                 tableInfo = new TableInfo(tableName, primaryKeys, columns);
             }
         } catch (SQLException e) {
-            log.error(e.getMessage(), e);
+            log.error(e.toString(), e);
             throw new SourceException(e.getMessage() + ", jdbcUrl=" + this.jdbcSourceInfo.getJdbcUrl());
         } finally {
             SourceUtils.releaseConnection(connection);
@@ -580,11 +586,11 @@ public class SqlUtils {
                 }
             }
         } catch (Exception e) {
-            log.error(e.getMessage(), e);
+            log.error(e.toString(), e);
             throw new SourceException("Get connection meta data error, jdbcUrl=" + this.jdbcSourceInfo.getJdbcUrl());
         } finally {
-            SourceUtils.releaseConnection(connection);
             SourceUtils.closeResult(rs);
+            SourceUtils.releaseConnection(connection);
         }
         return result;
     }
@@ -664,38 +670,28 @@ public class SqlUtils {
         }
     }
 
-
     public JdbcTemplate jdbcTemplate() throws SourceException {
         Connection connection = null;
         try {
-            connection = sourceUtils.getConnection(this.jdbcSourceInfo);
-        } catch (SourceException e) {
-        }
-        if (connection == null) {
-            sourceUtils.releaseDataSource(this.jdbcSourceInfo);
-        } else {
+            connection = sourceUtils.getConnection(jdbcSourceInfo);
+        } finally {
             SourceUtils.releaseConnection(connection);
         }
-        DataSource dataSource = sourceUtils.getDataSource(this.jdbcSourceInfo);
+        DataSource dataSource = sourceUtils.getDataSource(jdbcSourceInfo);
         JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
         jdbcTemplate.setFetchSize(500);
         return jdbcTemplate;
     }
 
     public boolean testConnection() throws SourceException {
-        Connection connection = null;
-        try {
-            connection = sourceUtils.getConnection(jdbcSourceInfo);
+        try (Connection connection = sourceUtils.getConnection(jdbcSourceInfo);) {
             if (null != connection) {
                 return true;
             } else {
                 return false;
             }
-        } catch (SourceException sourceException) {
-            throw sourceException;
-        } finally {
-            SourceUtils.releaseConnection(connection);
-            sourceUtils.releaseDataSource(jdbcSourceInfo);
+        } catch (Exception e) {
+            throw new SourceException(e.getMessage());
         }
     }
 
@@ -1055,7 +1051,12 @@ public class SqlUtils {
     }
 
     public static String formatSql(String sql) {
-        return SQLUtils.formatMySql(sql);
+        try {
+            return SQLUtils.formatMySql(sql);
+        } catch (Exception e) {
+            // ignore
+        }
+        return sql;
     }
 }
 
