@@ -23,6 +23,7 @@ import com.alibaba.druid.util.StringUtils;
 import edp.core.utils.CollectionUtils;
 import edp.core.utils.SqlUtils;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,8 +32,9 @@ import java.util.stream.Collectors;
 
 import static edp.core.consts.Consts.*;
 
+@EqualsAndHashCode(callSuper = true)
 @Data
-public class ViewExecuteParam {
+public class ViewExecuteParam extends ConcurrencyStrategy{
     private List<String> groups;
     private List<Aggregator> aggregators;
     private List<Order> orders;
@@ -49,6 +51,7 @@ public class ViewExecuteParam {
     private boolean nativeQuery = false;
 
     public ViewExecuteParam() {
+
     }
 
     public ViewExecuteParam(List<String> groupList,
@@ -102,8 +105,6 @@ public class ViewExecuteParam {
 
             for (Order order : this.orders) {
                 String column = order.getColumn().trim();
-//                Matcher matcher = PATTERN_SQL_AGGREGATE.matcher(order.getColumn().trim().toLowerCase());
-//                if (!matcher.find()) {
                 StringBuilder columnBuilder = new StringBuilder();
                 if (!column.startsWith(prefix)) {
                     columnBuilder.append(prefix);
@@ -113,7 +114,6 @@ public class ViewExecuteParam {
                     columnBuilder.append(suffix);
                 }
                 order.setColumn(columnBuilder.toString());
-//                }
                 list.add(order);
             }
         }

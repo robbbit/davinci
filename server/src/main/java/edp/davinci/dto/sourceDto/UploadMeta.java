@@ -28,13 +28,13 @@ import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
 
 @Data
-@NotNull(message = "csv meta cannot be null")
+@NotNull(message = "Csv meta cannot be null")
 public class UploadMeta {
 
-    @NotBlank(message = "table name cannot be EMPTY")
+    @NotBlank(message = "Table name cannot be empty")
     private String tableName;
 
     @Min(value = (short) 0, message = "Invalid mode")
-    @Max(value = (short) 2, message = "Invalid mode")
+    @Max(value = (short) 3, message = "Invalid mode")
     private short mode = UploadModeEnum.NEW.getMode();
 }

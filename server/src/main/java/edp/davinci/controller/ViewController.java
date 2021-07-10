@@ -36,7 +36,6 @@ import io.swagger.annotations.ApiResponse;
 import io.swagger.annotations.ApiResponses;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindingResult;
@@ -242,7 +241,7 @@ public class ViewController extends BaseController {
         }
 
         Paginate<Map<String, Object>> paginate = viewService.getData(id, executeParam, user);
-        return ResponseEntity.ok().cacheControl(CacheControl.noCache()).body(new ResultMap(tokenUtils).successAndRefreshToken(request).payload(paginate));
+        return ResponseEntity.ok().body(new ResultMap(tokenUtils).successAndRefreshToken(request).payload(paginate));
     }
 
 
@@ -277,7 +276,7 @@ public class ViewController extends BaseController {
 
     @ApiOperation(value = "get dac tenants")
     @GetMapping("/dac/{dacName}/tenants")
-    public ResponseEntity getDacTannets(@PathVariable String dacName, @ApiIgnore @CurrentUser User user, HttpServletRequest request) {
+    public ResponseEntity getDacTenants(@PathVariable String dacName, @ApiIgnore @CurrentUser User user, HttpServletRequest request) {
 
         return ResponseEntity.ok(new ResultMap(tokenUtils).successAndRefreshToken(request).payloads(dacChannelUtil.getTenants(dacName)));
     }

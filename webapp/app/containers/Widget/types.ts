@@ -18,7 +18,7 @@
  * >>
  */
 
-import { IWidgetConfig } from "./components/Widget"
+import { IWidgetConfig } from './components/Widget'
 
 export interface IWidgetBase {
   id: number
@@ -28,6 +28,7 @@ export interface IWidgetBase {
   type: number
   viewId: number
   projectId: number
+  viewName?: string
 }
 
 export interface IWidgetRaw extends IWidgetBase {
@@ -36,14 +37,12 @@ export interface IWidgetRaw extends IWidgetBase {
 
 export interface IWidgetFormed extends IWidgetBase {
   config: IWidgetConfig
-  dataToken?: string // widget response in Share request
+  dataToken?: string
 }
 
 export interface IWidgetState {
-  widgets: IWidgetRaw[]
-  currentWidget: IWidgetRaw
+  widgets: IWidgetFormed[]
+  currentWidget: IWidgetFormed
   loading: boolean
   dataLoading: boolean
-  columnValueLoading: boolean
-  distinctColumnValues: any[]
 }

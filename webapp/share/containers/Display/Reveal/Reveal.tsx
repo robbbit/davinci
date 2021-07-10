@@ -20,12 +20,12 @@
 
 import React, { useEffect } from 'react'
 import { useSelector } from 'react-redux'
-import { useHistory } from 'react-router-dom'
 
 import { makeSelectDisplay, makeSelectSlidesCount } from '../selectors'
 
 import Reveal from 'reveal.js'
-import 'reveal.js/css/reveal.css'
+import 'reveal.js/dist/reveal.css'
+import RevealZoom from 'reveal.js/plugin/zoom/plugin'
 
 import { DefaultDisplayParams } from 'containers/Display/constants'
 import Display from './Display'
@@ -38,8 +38,7 @@ const ShareDisplayReveal: React.FC = () => {
     displayParams || DefaultDisplayParams
 
   const slidesCount = useSelector(makeSelectSlidesCount())
-  const history = useHistory()
-  const slideNumberParam = new URLSearchParams(history.location.search).get('p')
+  const slideNumberParam = new URLSearchParams(window.location.search).get('p')
   const slideNumber = +slideNumberParam
   useEffect(() => {
     Reveal.initialize({
@@ -67,12 +66,7 @@ const ShareDisplayReveal: React.FC = () => {
 
       viewDistance: 100,
 
-      dependencies: [
-        {
-          src: 'plugin/zoom-js/zoom.js',
-          async: true
-        }
-      ]
+      plugins: [RevealZoom]
     })
   }, [])
 

@@ -21,19 +21,16 @@
 import produce from 'immer'
 import { IWidgetState } from './types'
 import { ActionTypes } from './constants'
-import { LOAD_DASHBOARD_DETAIL_SUCCESS } from '../Dashboard/constants'
 import { ActionTypes as ViewActionTypes } from '../View/constants'
 import { WidgetActionType } from './actions'
 import { ViewActionType } from 'containers/View/actions'
 import { DisplayActionType } from 'containers/Display/actions'
 
 export const initialState: IWidgetState = {
-  widgets: [],
+  widgets: null,
   currentWidget: null,
   loading: false,
-  dataLoading: false,
-  columnValueLoading: false,
-  distinctColumnValues: null
+  dataLoading: false
 }
 
 const widgetReducer = (
@@ -108,10 +105,15 @@ const widgetReducer = (
         break
       case ActionTypes.COPY_WIDGET_SUCCESS:
         const fromWidgetId = action.payload.fromWidgetId
+        const copyWidgetIndex = draft.widgets.findIndex(({ id }) => id === fromWidgetId)
         draft.widgets.splice(
-          draft.widgets.findIndex(({ id }) => id === fromWidgetId) + 1,
+          copyWidgetIndex + 1,
           0,
-          action.payload.result
+          {
+            ...action.payload.result,
+            viewName: draft.widgets[copyWidgetIndex].viewName
+          }
+         
         )
         draft.loading = false
         break
@@ -126,22 +128,6 @@ const widgetReducer = (
         break
       case ViewActionTypes.LOAD_VIEW_DATA_FAILURE:
         draft.dataLoading = false
-        break
-
-      case LOAD_DASHBOARD_DETAIL_SUCCESS:
-        draft.widgets = action.payload.widgets
-        break
-
-      case ViewActionTypes.LOAD_VIEW_DISTINCT_VALUE:
-        draft.columnValueLoading = true
-        draft.distinctColumnValues = null
-        break
-      case ViewActionTypes.LOAD_VIEW_DISTINCT_VALUE_SUCCESS:
-        draft.columnValueLoading = false
-        draft.distinctColumnValues = action.payload.data.slice(0, 100)
-        break
-      case ViewActionTypes.LOAD_VIEW_DISTINCT_VALUE_FAILURE:
-        draft.columnValueLoading = false
         break
 
       case ActionTypes.CLEAR_CURRENT_WIDGET:
